@@ -95,7 +95,9 @@ export default function Disponibilites() {
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-ink/60 mt-2">Bleu clair : confirmée · Bleu foncé : en cours · Jaune : maintenance · Survole une case pour voir le client.</p>
+     <p className="text-xs text-ink/60 mt-2">
+  Rose clair : confirmée · Rose foncé : en cours · Jaune : maintenance · Survole une case pour voir le client.
+</p>
     </div>
   );
 }
