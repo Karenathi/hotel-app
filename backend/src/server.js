@@ -2,7 +2,8 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import mysql from 'mysql2/promise';
+import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import { pool } from './db.js';
 
 import { authenticate } from './middleware/auth.js';
@@ -16,7 +17,6 @@ import statsRoutes from './routes/stats.js';
 
 const app = express();
 
-// Autoriser le frontend Vercel
 const origins = (process.env.FRONTEND_URL || '')
   .split(',')
   .map((s) => s.trim())
@@ -26,95 +26,79 @@ app.use(cors({
   origin: origins.length ? origins : true
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: '10kb' }));
 
-// Tester si le backend fonctionne
+// Vérification du serveur
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-// TEST 1 : connexion avec le pool MySQL
-app.get('/api/db-test', async (_req, res) => {
+// Création temporaire du premier administrateur
+app.post('/api/setup-admin', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT 1 AS test');
+    const secret = process.env.ADMIN_SETUP_SECRET;
+    const provided = req.get('x-setup-secret');
 
-    res.json({
-      database: 'connected',
-      result: rows[0].test
-    });
-  } catch (err) {
-    console.error('DB TEST ERROR:', {
-      code: err.code,
-      message: err.message
-    });
+    if (!secret || !provided) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
 
-    res.status(503).json({
-      database: 'disconnected',
-      code: err.code || 'UNKNOWN'
-    });
-  }
-});
+    const expectedBuffer = Buffer.from(secret);
+    const providedBuffer = Buffer.from(provided);
 
-// TEST 2 : nouvelle connexion directe à Enzonic
-app.get('/api/db-diagnostic', async (_req, res) => {
-  let connection;
-  let stage = 'connecting';
+    if (
+      expectedBuffer.length !== providedBuffer.length ||
+      !crypto.timingSafeEqual(expectedBuffer, providedBuffer)
+    ) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
 
-  try {
-    if (!process.env.DATABASE_URL) {
-      return res.status(503).json({
-        status: 'error',
-        stage: 'configuration',
-        code: 'DATABASE_URL_MISSING'
+    const [existingAdmins] = await pool.query(
+      "SELECT id FROM utilisateurs WHERE role = 'admin' LIMIT 1"
+    );
+
+    if (existingAdmins.length > 0) {
+      return res.status(409).json({
+        error: 'Un administrateur existe déjà'
       });
     }
 
-    connection = await mysql.createConnection({
-      uri: process.env.DATABASE_URL,
-      ssl: {},
-      connectTimeout: 30000
-    });
+    const password = req.body?.password;
 
-    stage = 'querying';
+    if (typeof password !== 'string' || password.length < 12) {
+      return res.status(400).json({
+        error: 'Mot de passe de 12 caractères minimum requis'
+      });
+    }
 
-    const [rows] = await connection.query(
-      'SELECT 1 AS test'
+    const hash = await bcrypt.hash(password, 12);
+
+    await pool.query(
+      `INSERT INTO utilisateurs
+       (email, mot_de_passe_hash, role)
+       VALUES (?, ?, ?)`,
+      ['admin@hotel.com', hash, 'admin']
     );
 
-    res.json({
-      status: 'connected',
-      result: rows[0].test
+    res.status(201).json({
+      status: 'created',
+      email: 'admin@hotel.com'
     });
   } catch (err) {
-    console.error('MYSQL DIAGNOSTIC:', {
-      stage,
-      code: err.code,
-      message: err.message
-    });
+    console.error('ADMIN SETUP ERROR:', err.code || err.message);
 
-    res.status(503).json({
-      status: 'error',
-      stage,
-      code: err.code || 'UNKNOWN'
+    res.status(500).json({
+      error: 'Impossible de créer le compte'
     });
-  } finally {
-    if (connection) {
-      try {
-        await connection.end();
-      } catch (_) {
-        // La connexion peut deja etre fermee
-      }
-    }
   }
 });
 
 // Connexion des utilisateurs
 app.use('/api/auth', authRoutes);
 
-// Protection des routes suivantes
+// Protection des routes de l'application
 app.use('/api', authenticate);
 
-// Routes de l'application Hotel Lagon
 app.use('/api/clients', clientsRoutes);
 app.use('/api/chambres', chambresRoutes);
 app.use('/api/reservations', reservationsRoutes);
@@ -125,13 +109,9 @@ app.use('/api/stats', statsRoutes);
 // Gestion des erreurs
 app.use((err, _req, res, _next) => {
   console.error(err);
-
-  res.status(500).json({
-    error: 'Erreur serveur'
-  });
+  res.status(500).json({ error: 'Erreur serveur' });
 });
 
-// Demarrage du serveur
 const port = process.env.PORT || 4000;
 
 app.listen(port, () => {
