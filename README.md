@@ -16,4 +16,4 @@ Si MAMP utilise un autre port MySQL, modifie `backend/.env` (DB_PORT, DB_PASSWOR
 Sur Windows : port 3306 et mot de passe vide.
 
 ## Mise en ligne
-Voir les étapes dans la réponse de Claude : base MySQL hébergée + backend Render + frontend Vercel.
+ base MySQL hébergée + backend Render + frontend Vercel.
