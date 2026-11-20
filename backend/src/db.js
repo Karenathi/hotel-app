@@ -2,7 +2,7 @@
 import 'dotenv/config';
 import mysql from 'mysql2/promise';
 
-// Connexion à MySQL avec la méthode recommandée par Enzonic
+// Connexion MySQL : Railway ou configuration locale
 const databaseUrl = process.env.DATABASE_URL;
 
 export const pool = mysql.createPool({
@@ -16,12 +16,10 @@ export const pool = mysql.createPool({
         database: process.env.DB_NAME || 'hotel_db'
       }),
 
-  // SSL obligatoire sur Enzonic
-  ssl: databaseUrl
-    ? {}
-    : process.env.DB_SSL === 'true'
-      ? { rejectUnauthorized: true }
-      : undefined,
+  // SSL uniquement si explicitement activé
+  ...(process.env.DB_SSL === 'true'
+    ? { ssl: { rejectUnauthorized: true } }
+    : { ssl: undefined }),
 
   waitForConnections: true,
   connectionLimit: 5,
